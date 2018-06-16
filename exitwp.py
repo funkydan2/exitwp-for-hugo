@@ -17,13 +17,13 @@ from bs4 import BeautifulSoup
 from html2text import html2text_file
 
 '''
-exitwp - Wordpress xml exports to Jekykll blog format conversion
+exitwp - Wordpress xml exports to Hugo blog format conversion
 
-Tested with Wordpress 3.3.1 and jekyll 0.11.2
+Tested with Wordpress 3.3.1 and Hugo 0.42
 
 '''
 ######################################################
-# Configration
+# Configuration
 ######################################################
 config = yaml.load(file('config.yaml', 'r'))
 wp_exports = config['wp_exports']
@@ -97,12 +97,13 @@ def parse_wp_xml(file):
         }
 
     def parse_items():
+
         export_items = []
         xml_items = c.findall('item')
         for i in xml_items:
-            taxanomies = i.findall('category')
-            export_taxanomies = {}
-            for tax in taxanomies:
+            taxonomies = i.findall('category')
+            export_taxonomies = {}
+            for tax in taxonomies:
                 if 'domain' not in tax.attrib:
                     continue
                 t_domain = unicode(tax.attrib['domain'])
@@ -111,9 +112,25 @@ def parse_wp_xml(file):
                     not (t_domain
                          in taxonomy_entry_filter and
                          taxonomy_entry_filter[t_domain] == t_entry)):
-                    if t_domain not in export_taxanomies:
-                        export_taxanomies[t_domain] = []
-                    export_taxanomies[t_domain].append(t_entry)
+                    if t_domain not in export_taxonomies:
+                        export_taxonomies[t_domain] = []
+                    export_taxonomies[t_domain].append(t_entry)
+
+
+            # Added DS 16/6 - finds sermon_audio value from Sermon Manager
+            sermon_meta={}
+            meta = i.findall(ns['wp']+'postmeta')
+            for m in meta:
+                key = m.find(ns['wp']+'meta_key').text
+                val = m.find(ns['wp']+'meta_value').text
+
+                if 'sermon_audio' in key:
+                    sermon_meta['audio'] = val
+                elif 'sermon_duration' in key:
+                    sermon_meta['audio_duration'] = val
+                elif 'bible_passage' in key:
+                    sermon_meta['passage'] = val
+            # End Added DS
 
             def gi(q, unicode_wrap=True, empty=False):
                 namespace = ''
@@ -162,10 +179,11 @@ def parse_wp_xml(file):
                 'wp_id': gi('wp:post_id'),
                 'parent': gi('wp:post_parent'),
                 'comments': gi('wp:comment_status') == u'open',
-                'taxanomies': export_taxanomies,
+                'taxonomies': export_taxonomies,
                 'body': body,
                 'excerpt': excerpt,
-                'img_srcs': img_srcs
+                'img_srcs': img_srcs,
+                'sermon_meta': sermon_meta
             }
 
             export_items.append(export_item)
@@ -178,13 +196,13 @@ def parse_wp_xml(file):
     }
 
 
-def write_jekyll(data, target_format):
+def write_hugo(data, target_format):
 
     sys.stdout.write('writing')
     item_uids = {}
     attachments = {}
 
-    def get_blog_path(data, path_infix='hugo'): #AW!! Changed jekyll path into hugo
+    def get_blog_path(data, path_infix='hugo'):
         name = data['header']['link']
         name = re.sub('^https?', '', name)
         name = re.sub('[^A-Za-z0-9_.-]', '', name)
@@ -289,12 +307,12 @@ def write_jekyll(data, target_format):
         sys.stdout.write('.')
         sys.stdout.flush()
         out = None
-		
+
         item_url = urlparse(i['link'])        # AW!!: Store item url for later url path relative
         yaml_header = {
             'title': i['title'],
-            'url': item_url.path,             # AW!!: Renamed: link (Jekykll) -> url and and make url path relative
-            'author': i['author'],
+            #'url': item_url.path,             # AW!!: Renamed: link (Jekykll) -> url and and make url path relative DS!!: Removed
+            #'author': i['author'],            # DS!!: Removed - I don't want this!
             'date': datetime.strptime(
                 i['date'], '%Y-%m-%d %H:%M:%S').replace(tzinfo=UTC())
             #'slug': i['slug'],               # AW!!: can be used
@@ -310,9 +328,9 @@ def write_jekyll(data, target_format):
 
         if i['type'] == 'post':
             i['uid'] = get_item_uid(i, date_prefix=True)
-            fn = get_item_path(i, dir='_posts')
+            fn = get_item_path(i, dir='posts')
             out = open_file(fn)
-            yaml_header['type'] = 'post'      # AW!!: Changed from layout into type
+            #yaml_header['type'] = 'post'      # AW!!: Changed from layout into type DS!!: Removed
         elif i['type'] == 'page':
             i['uid'] = get_item_uid(i)
             # Chase down parent path, if any
@@ -327,7 +345,16 @@ def write_jekyll(data, target_format):
                     break
             fn = get_item_path(i, parentpath)
             out = open_file(fn)
-            yaml_header['type'] = 'page'      # AW!!: Changed from layout into type
+            #yaml_header['type'] = 'page'      # AW!!: Changed from layout into type DS!!: Removed
+        elif i['type'] == 'wpfc_sermon':    #DS:Added
+            i['uid'] = get_item_uid(i, date_prefix=True)
+            fn = get_item_path(i, dir='sermons')
+            out = open_file(fn)
+            #yaml_header['type'] = 'sermon' DS!!: Removed
+            yaml_header['audio'] = i['sermon_meta']['audio']
+            if 'audio_duration' in i['sermon_meta']:
+                yaml_header['audio_duration'] = i['sermon_meta']['audio_duration']
+            yaml_header['passage'] = i['sermon_meta']['passage']
         elif i['type'] in item_type_filter:
             pass
         else:
@@ -349,8 +376,8 @@ def write_jekyll(data, target_format):
                                       default_flow_style=False).decode('utf-8')
 
             tax_out = {}
-            for taxonomy in i['taxanomies']:
-                for tvalue in i['taxanomies'][taxonomy]:
+            for taxonomy in i['taxonomies']:
+                for tvalue in i['taxonomies'][taxonomy]:
                     t_name = taxonomy_name_mapping.get(taxonomy, taxonomy)
                     if t_name not in tax_out:
                         tax_out[t_name] = []
@@ -376,6 +403,6 @@ def write_jekyll(data, target_format):
 wp_exports = glob(wp_exports + '/*.xml')
 for wpe in wp_exports:
     data = parse_wp_xml(wpe)
-    write_jekyll(data, target_format)
+    write_hugo(data, target_format)
 
 print 'done'
