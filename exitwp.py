@@ -354,7 +354,8 @@ def write_hugo(data, target_format):
             yaml_header['audio'] = i['sermon_meta']['audio']
             if 'audio_duration' in i['sermon_meta']:
                 yaml_header['audio_duration'] = i['sermon_meta']['audio_duration']
-            yaml_header['passage'] = i['sermon_meta']['passage']
+            if 'passage' in i['sermon_meta']:
+                yaml_header['passage'] = i['sermon_meta']['passage']
         elif i['type'] in item_type_filter:
             pass
         else:
